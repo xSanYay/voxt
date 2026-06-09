@@ -81,6 +81,7 @@ voxt — video to transcript
 
 USAGE
   voxt <video>              transcribe a video file
+  voxt install              install voxt as a command (run once from the repo)
   voxt setup                guided setup (install or locate ffmpeg + whisper)
   voxt help                 show this help
   voxt config               show current saved config
@@ -95,11 +96,64 @@ OUTPUT
   transcript saved as <video>.txt in the same folder
 
 EXAMPLES
+  python3 voxt.py install   <- first time only, then just use 'voxt'
   voxt episode.mp4
   voxt clip.mkv --model ~/models/ggml-large.bin
   voxt setup
   voxt config
 """)
+
+
+def cmd_install():
+    os_name  = detect_os()
+    src      = os.path.abspath(__file__)   # wherever voxt.py lives right now
+
+    if os_name == "windows":
+        # on Windows: create a voxt.bat in a directory that's on PATH
+        # best cross-user choice is the Python Scripts folder
+        import sysconfig
+        scripts_dir = sysconfig.get_path("scripts")
+        wrapper     = os.path.join(scripts_dir, "voxt.bat")
+        content     = f'@echo off\npython "{src}" %*\n'
+        try:
+            with open(wrapper, "w") as f:
+                f.write(content)
+            print(f"✓ installed  →  {wrapper}")
+            print("  open a new terminal and run: voxt help")
+        except PermissionError:
+            print(f"✗ permission denied writing to {scripts_dir}")
+            print(f"  try running this as Administrator, or manually copy:")
+            print(f'  echo @echo off > "{wrapper}"')
+            print(f'  echo python "{src}" %* >> "{wrapper}"')
+        return
+
+    # mac / linux: write a shell wrapper to /usr/local/bin/voxt
+    wrapper = "/usr/local/bin/voxt"
+    content = f'#!/bin/sh\nexec python3 "{src}" "$@"\n'
+
+    try:
+        with open(wrapper, "w") as f:
+            f.write(content)
+        os.chmod(wrapper, 0o755)
+        print(f"✓ installed  →  {wrapper}")
+        print("  open a new terminal and run: voxt help")
+    except PermissionError:
+        # offer to retry with sudo
+        print(f"  needs permission to write to {wrapper}")
+        print(f"  will run: sudo tee {wrapper}")
+        ans = input("  ok? [y/n]: ").strip().lower()
+        if ans not in ("y", "yes"):
+            print("  skipped — you can install manually:")
+            print(f'  echo \'#!/bin/sh\\nexec python3 "{src}" "$@"\' | sudo tee {wrapper} && sudo chmod +x {wrapper}')
+            return
+        cmd = f'echo \'#!/bin/sh\nexec python3 "{src}" "$@"\' | sudo tee {wrapper} && sudo chmod +x {wrapper}'
+        result = subprocess.run(cmd, shell=True)
+        if result.returncode == 0:
+            print(f"✓ installed  →  {wrapper}")
+            print("  open a new terminal and run: voxt help")
+        else:
+            print("✗ install failed — try manually:")
+            print(f'  echo \'#!/bin/sh\\nexec python3 "{src}" "$@"\' | sudo tee {wrapper} && sudo chmod +x {wrapper}')
 
 
 def cmd_config():
@@ -141,7 +195,6 @@ def detect_os():
 
 
 def verify_binary(path, flag="-version"):
-    """Run <path> -version and return (ok, output)."""
     try:
         r = subprocess.run([path, flag], capture_output=True, text=True, timeout=10)
         out = (r.stdout + r.stderr).strip().splitlines()
@@ -163,16 +216,14 @@ def install_ffmpeg(os_name):
         "linux":   "sudo apt install ffmpeg",
         "windows": "winget install ffmpeg",
     }
-    cmd = cmds.get(os_name, None)
+    cmd = cmds.get(os_name)
     if not cmd:
         print("  ✗ unknown OS — install ffmpeg manually and re-run voxt setup")
         return False
-
     print(f"\n  will run:  {cmd}")
     if not ask_yes_no("  ok to run this?"):
         print("  skipped — install ffmpeg manually and re-run voxt setup")
         return False
-
     print()
     result = subprocess.run(cmd, shell=True)
     if result.returncode != 0:
@@ -188,16 +239,14 @@ def install_whisper(os_name):
         "linux":   "sudo apt install whisper-cpp",
         "windows": "winget install whisper-cpp",
     }
-    cmd = cmds.get(os_name, None)
+    cmd = cmds.get(os_name)
     if not cmd:
         print("  ✗ unknown OS — install whisper-cpp manually and re-run voxt setup")
         return False
-
     print(f"\n  will run:  {cmd}")
     if not ask_yes_no("  ok to run this?"):
         print("  skipped — install whisper-cpp manually and re-run voxt setup")
         return False
-
     print()
     result = subprocess.run(cmd, shell=True)
     if result.returncode != 0:
@@ -256,7 +305,6 @@ def cmd_setup():
         ok = install_whisper(os_name)
         if not ok:
             sys.exit(1)
-        # try common post-install paths
         candidates = [
             "/opt/homebrew/bin/whisper-cli",
             "/usr/local/bin/whisper-cli",
@@ -270,7 +318,6 @@ def cmd_setup():
         if not whisper_path:
             print("  installed — enter the whisper-cli path:")
             whisper_path = ask_path("whisper-cli", "/opt/homebrew/bin/whisper-cli")
-        ok, info = verify_binary(whisper_path, "--help")
         print(f"  ✓ found: {whisper_path}")
 
     # ── model ─────────────────────────────────────────────
@@ -335,6 +382,10 @@ def main():
         cmd_help()
         return
 
+    if args[0] == "install":
+        cmd_install()
+        return
+
     if args[0] == "setup":
         cmd_setup()
         return
@@ -352,8 +403,8 @@ def main():
         return
 
     # transcribe
-    video      = args[0]
-    model_arg  = None
+    video       = args[0]
+    model_arg   = None
     whisper_arg = None
 
     i = 1
