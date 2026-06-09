@@ -285,7 +285,9 @@ def cmd_download_model(save_dir=None):
     key, fname, size, desc = MODELS[int(choice) - 1]
 
     if save_dir is None:
-        default_dir = os.path.expanduser("~/models")
+        # default: whisper/models/ next to voxt.py (the repo folder)
+        repo_dir = os.path.dirname(os.path.abspath(__file__))
+        default_dir = os.path.join(repo_dir, "whisper", "models")
         raw = input(f"  save to [{default_dir}]: ").strip()
         save_dir = os.path.expanduser(raw) if raw else default_dir
 
@@ -325,7 +327,7 @@ def cmd_set_model():
     print()
     has_model = ask_yes_no("  do you already have a .bin model file?")
     if has_model:
-        path = ask_path("model", "~/models/ggml-base.en.bin")
+        path = ask_path("model", os.path.join(os.path.dirname(os.path.abspath(__file__)), "whisper", "models", "ggml-base.en.bin"))
         if not path.endswith(".bin"):
             print("  ⚠  that doesn\'t look like a .bin file — continuing anyway")
         else:
@@ -430,7 +432,7 @@ def cmd_setup():
     has_model = ask_yes_no("  do you already have a .bin model file?")
 
     if has_model:
-        model_path = ask_path("model", "~/models/ggml-base.en.bin")
+        model_path = ask_path("model", os.path.join(os.path.dirname(os.path.abspath(__file__)), "whisper", "models", "ggml-base.en.bin"))
         if not model_path.endswith(".bin"):
             print("  ⚠  that doesn\'t look like a .bin file — continuing anyway")
         else:
@@ -458,7 +460,7 @@ def cmd_transcribe(video, model_arg=None, whisper_arg=None):
 
     config = read_config()
     whisper = resolve("whisper-cli", whisper_arg, "whisper", "/opt/homebrew/bin/whisper-cli", config)
-    model   = resolve("model (.bin)", model_arg,   "model",   "~/models/ggml-base.en.bin",    config)
+    model   = resolve("model (.bin)", model_arg,   "model",   os.path.join(os.path.dirname(os.path.abspath(__file__)), "whisper", "models", "ggml-base.en.bin"),    config)
 
     base    = os.path.splitext(video)[0]
     audio   = base + "_audio.wav"
