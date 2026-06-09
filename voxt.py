@@ -30,13 +30,13 @@ def save_config(config):
 
 
 def ask_path(label, hint=""):
-    prompt = f"  {label} path"
     if hint:
-        prompt += f" (e.g. {hint})"
-    prompt += ": "
+        prompt = f"  {label} path [{hint}]: "
+    else:
+        prompt = f"  {label} path: "
     while True:
-        path = input(prompt).strip()
-        path = os.path.expanduser(path)
+        raw = input(prompt).strip()
+        path = os.path.expanduser(raw if raw else hint)
         if os.path.exists(path):
             return path
         print(f"  ✗ not found: {path} — try again")
