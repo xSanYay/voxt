@@ -87,6 +87,7 @@ USAGE
   voxt config               show current saved config
   voxt set-whisper          update whisper-cli path
   voxt set-model            update model path
+  voxt download-model       download a ggml model interactively
 
 OPTIONS (override saved config for one run)
   voxt <video> --model   /path/to/model.bin
@@ -256,6 +257,78 @@ def install_whisper(os_name):
     return True
 
 
+MODELS = [
+    ("base.en",   "ggml-base.en.bin",   "~150 MB", "fast, English only — good default"),
+    ("small.en",  "ggml-small.en.bin",  "~500 MB", "more accurate, English only"),
+    ("medium.en", "ggml-medium.en.bin", "~1.5 GB", "even better, English only"),
+    ("large-v3",  "ggml-large-v3.bin",  "~3 GB",   "best quality, multilingual"),
+]
+HF_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
+HF_PAGE = "https://huggingface.co/ggerganov/whisper.cpp/tree/main"
+
+
+def cmd_download_model(save_dir=None):
+    """Interactive model downloader. Returns path to model on success, None on abort."""
+    print("  available models (downloaded directly):\n")
+    for i, (key, fname, size, desc) in enumerate(MODELS, 1):
+        print(f"    {i})  {fname:<26} {size:<8}  {desc}")
+    print(f"    5)  more models — open HuggingFace page")
+    print(f"    0)  skip for now")
+    print()
+
+    while True:
+        choice = input("  pick a model [0-5]: ").strip()
+        if choice == "0":
+            print("  skipped — run  voxt download-model  when ready")
+            return None
+        if choice == "5":
+            import webbrowser
+            print(f"  opening {HF_PAGE}")
+            webbrowser.open(HF_PAGE)
+            print("  download a .bin file, then run:  voxt set-model")
+            return None
+        if choice in ("1","2","3","4"):
+            break
+        print("  enter a number between 0 and 5")
+
+    key, fname, size, desc = MODELS[int(choice) - 1]
+
+    if save_dir is None:
+        default_dir = os.path.expanduser("~/models")
+        raw = input(f"  save to [{default_dir}]: ").strip()
+        save_dir = os.path.expanduser(raw) if raw else default_dir
+
+    os.makedirs(save_dir, exist_ok=True)
+    dest = os.path.join(save_dir, fname)
+
+    if os.path.exists(dest):
+        print(f"  ✓ already exists: {dest}")
+        return dest
+
+    url = f"{HF_BASE}/{fname}"
+    print(f"\n  downloading {fname} ({size}) ...")
+    print(f"  from {url}\n")
+
+    # use curl or wget, both stream progress natively
+    if subprocess.run(["which", "curl"], capture_output=True).returncode == 0:
+        result = subprocess.run(["curl", "-L", "--progress-bar", "-o", dest, url])
+    elif subprocess.run(["which", "wget"], capture_output=True).returncode == 0:
+        result = subprocess.run(["wget", "-O", dest, url])
+    else:
+        print("  ✗ neither curl nor wget found — download manually:")
+        print(f"  {url}")
+        print(f"  save as: {dest}")
+        return None
+
+    if result.returncode != 0:
+        print("  ✗ download failed — check your connection or download manually:")
+        print(f"  {url}")
+        return None
+
+    print(f"\n  ✓ saved: {dest}")
+    return dest
+
+
 def cmd_setup():
     os_name = detect_os()
     config  = read_config()
@@ -289,29 +362,48 @@ def cmd_setup():
             sys.exit(1)
 
     # ── whisper-cli ───────────────────────────────────────
+    # ── whisper-cli ───────────────────────────────────────
     print("\n[ whisper-cli ]")
     already = ask_yes_no("  already installed?")
 
+    WHISPER_CANDIDATES = [
+        "/opt/homebrew/bin/whisper-cli",
+        "/usr/local/bin/whisper-cli",
+        "/usr/bin/whisper-cli",
+        "whisper-cli",
+    ]
+
     if already:
-        whisper_path = input("  whisper-cli path (e.g. /opt/homebrew/bin/whisper-cli): ").strip()
-        whisper_path = os.path.expanduser(whisper_path)
-        ok, info = verify_binary(whisper_path, "--help")
-        if ok or "usage" in info.lower() or "whisper" in info.lower():
-            print(f"  ✓ found: {whisper_path}")
-        else:
-            print(f"  ✗ could not run whisper-cli: {info}")
-            sys.exit(1)
+        # auto-scan first
+        whisper_path = None
+        for c in WHISPER_CANDIDATES:
+            ok, info = verify_binary(c, "--help")
+            if ok or "usage" in info.lower() or "whisper" in info.lower():
+                whisper_path = c
+                print(f"  ✓ found automatically: {c}")
+                break
+
+        # if not found, ask
+        if not whisper_path:
+            print("  not found in common locations — enter the path manually:")
+            while True:
+                raw = input("  whisper-cli path: ").strip()
+                if not raw:
+                    print("  ✗ path cannot be empty")
+                    continue
+                raw = os.path.expanduser(raw)
+                ok, info = verify_binary(raw, "--help")
+                if ok or "usage" in info.lower() or "whisper" in info.lower():
+                    whisper_path = raw
+                    print(f"  ✓ verified: {whisper_path}")
+                    break
+                print(f"  ✗ could not run it: {info} — try again")
     else:
         ok = install_whisper(os_name)
         if not ok:
             sys.exit(1)
-        candidates = [
-            "/opt/homebrew/bin/whisper-cli",
-            "/usr/local/bin/whisper-cli",
-            "/usr/bin/whisper-cli",
-        ]
         whisper_path = None
-        for c in candidates:
+        for c in WHISPER_CANDIDATES:
             if os.path.exists(c):
                 whisper_path = c
                 break
@@ -321,13 +413,21 @@ def cmd_setup():
         print(f"  ✓ found: {whisper_path}")
 
     # ── model ─────────────────────────────────────────────
-    print("\n[ model (.bin) ]")
-    print("  enter the path to your ggml model file:")
-    model_path = ask_path("model", "~/models/ggml-base.en.bin")
-    if not model_path.endswith(".bin"):
-        print("  ⚠  that doesn't look like a .bin file — continuing anyway")
+    print("\n[ ggml model (.bin) ]")
+    print("  whisper-cli needs a separate model file — not included with whisper-cli.\n")
+
+    has_model = ask_yes_no("  do you already have a .bin model file?")
+
+    if has_model:
+        model_path = ask_path("model", "~/models/ggml-base.en.bin")
+        if not model_path.endswith(".bin"):
+            print("  ⚠  that doesn\'t look like a .bin file — continuing anyway")
+        else:
+            print(f"  ✓ found: {model_path}")
     else:
-        print(f"  ✓ found: {model_path}")
+        model_path = cmd_download_model()
+        if not model_path:
+            sys.exit(0)
 
     # ── save ─────────────────────────────────────────────
     config["whisper"] = whisper_path
@@ -400,6 +500,15 @@ def main():
 
     if args[0] == "set-model":
         cmd_set_model()
+        return
+
+    if args[0] == "download-model":
+        config = read_config()
+        path = cmd_download_model()
+        if path:
+            config["model"] = path
+            save_config(config)
+            print(f"✓ model saved to config")
         return
 
     # transcribe
