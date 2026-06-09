@@ -178,15 +178,6 @@ def cmd_set_whisper():
     print(f"✓ saved")
 
 
-def cmd_set_model():
-    config = read_config()
-    print("enter new model path:")
-    path = ask_path("model (.bin)", "~/models/ggml-base.en.bin")
-    config["model"] = path
-    save_config(config)
-    print(f"✓ saved")
-
-
 def detect_os():
     s = platform.system()
     if s == "Darwin":  return "mac"
@@ -263,8 +254,8 @@ MODELS = [
     ("medium.en", "ggml-medium.en.bin", "~1.5 GB", "even better, English only"),
     ("large-v3",  "ggml-large-v3.bin",  "~3 GB",   "best quality, multilingual"),
 ]
-HF_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
-HF_PAGE = "https://huggingface.co/ggerganov/whisper.cpp/tree/main"
+HF_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"  # official ggerganov mirror
+HF_PAGE = "https://github.com/ggerganov/whisper.cpp/blob/master/models/README.md"
 
 
 def cmd_download_model(save_dir=None):
@@ -327,6 +318,26 @@ def cmd_download_model(save_dir=None):
 
     print(f"\n  ✓ saved: {dest}")
     return dest
+
+
+def cmd_set_model():
+    config = read_config()
+    print()
+    has_model = ask_yes_no("  do you already have a .bin model file?")
+    if has_model:
+        path = ask_path("model", "~/models/ggml-base.en.bin")
+        if not path.endswith(".bin"):
+            print("  ⚠  that doesn\'t look like a .bin file — continuing anyway")
+        else:
+            print(f"  ✓ found: {path}")
+    else:
+        path = cmd_download_model()
+        if not path:
+            return
+    config["model"] = path
+    save_config(config)
+    print(f"\n✓ model saved to config")
+
 
 
 def cmd_setup():
